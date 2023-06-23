@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en-US" dir="ltr">
+    <body>
+        <h2>Image to base64 Converter</h2>
+        <label for="file">Please Select HTML</label><br>
+        <input type="file" id="file" accept="text/html"><br><br>
+        <label for="images">Please Select Images</label><br>
+        <input type="file" id="images" accept="image/png" multiple="multiple"><br><br>
+
+        <div id="temp" style="display: none;"></div>
+
+        <button onclick="convertAndDownloadFile()">Convert & Download</button>
+        <div id="finalDownload" style="display: none;"></div>
+
+        <div id="canvasdiv" style="display: none;"></div>
+    </body>
+    <script>
+        async function convertAndDownloadFile() {
+            var fi = document.getElementById('file');
+            var errorEncountered = false;
+            var totalFileSize = 0;
+            if(fi.files.length !== 1) {
+                alert("Invalid File Selection");
+                return 0;
+            }
+
+            var images = document.getElementById('images');
+            if(images.files.length <= 1) {
+                alert("No Image File Selected");
+                return 0;
+            }
+
+            var htmlFile = fi.files[0];
+            if(htmlFile.type !== 'text/html') {
+                alert("Invalid File Type");
+                return 0;
+            }
+            var htmlFileName = htmlFile['name'];
+
+            let fileText = await readHTMLFile(htmlFile);
+            let orgFileText = fileText;
+            if(fileText === 0) {
+                alert("Error While Reading File")
+            }
+
+            document.getElementById("temp").innerHTML = fileText;
+
+            var tempDom = document.getElementById("temp");
+
+            var imagesArray = tempDom.getElementsByTagName("img");
+            var imgFileName = "";
+
+            for (const imgFile of imagesArray) {
+                let imgFileNameArr = imgFile.src.split("/");
+                let imgFileName = imgFileNameArr[imgFileNameArr.length -1];
+
+                if(imgFileName=="" || !imgFileName) {
+                    errorEncountered = true;
+                    alert("Image Not Found : "+imgFileName);
+                }
+
+                var imageFile = null;
+                for(itr = 0; itr < images.files.length; itr ++) {
+                    let selFile = images.files[itr];
+                    if(imgFileName === selFile.name) {
+                        imageFile = images.files[itr];
+                    }
+                }
+
+                if(!imageFile) {
+                    alert("Image Not Found : "+imgFileName);
+                }
+
+                // var imgBase64Str = await convertImagetoBase64(imageFile)
+                // imgFile.src = imgBase64Str;
+
+                var imgBase64Str = await removeEmptySpaceFromImageBase64(imageFile);
+
+                if(!imgBase64Str) {
+                    errorEncountered = true;
+                    alert("Not able to convert Image : "+imgFileName);
+                }
+
+                imgFile.src = imgBase64Str.base64Src;
+                imgFile.height = imgBase64Str.height - Math.floor((imgBase64Str.height*20)/100);
+                imgFile.width = imgBase64Str.width - Math.floor((imgBase64Str.width*20)/100);
+
+            }
+
+            if(errorEncountered) {
+                return;
+            }
+
+            var updateHTMLStr = document.getElementById("temp").innerHTML;
+
+            var fileName = "conv_"+htmlFileName;
+            var myFile = new Blob([updateHTMLStr], {type: 'text/html'});
+            window.URL = window.URL || window.webkitURL;
+
+            var dlBtn = document.createElement("a");
+            dlBtn.setAttribute("id", "download");
+            dlBtn.setAttribute("href", window.URL.createObjectURL(myFile));
+            dlBtn.setAttribute("download", fileName);
+
+            document.getElementById("finalDownload").appendChild(dlBtn);
+            dlBtn.click();
+
+        }
+
+        async function readHTMLFile(file) {
+            return new Promise((res, rej) => {
+                var reader = new FileReader();
+                reader.onload = function (evt) {
+                    res(evt.target.result);
+                }
+                reader.onerror = function (evt) {
+                    rej(0);
+                }
+                reader.readAsText(file, "UTF-8");
+            })
+            
+        }
+
+        async function convertImagetoBase64(file) {
+            return new Promise((res, rej) => {                
+                var reader = new FileReader();
+                reader.onloadend = function () {
+                    res(reader.result);
+                };
+                reader.onerror = function (evt) {
+                    rej(0);
+                }
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function getImageObject(imageFile) {
+            return new Promise((res, rej) => {
+                fr = new FileReader();
+                fr.onload = function(){
+                    imgObj = new Image();
+                    imgObj.onload = function() {
+                        res(imgObj);
+                    }
+                    imgObj.src = fr.result;
+                };
+                fr.onError = function(){
+                    rej(false);
+                }
+                fr.readAsDataURL(imageFile);
+            });
+        }
+
+        async function removeEmptySpaceFromImageBase64(imageFile) {
+
+            return new Promise(async (res, rej) => {
+
+                try {
+
+                    let imob = await getImageObject(imageFile);
+        
+                    let initialCanvas = document.createElement("canvas");
+                    var context = initialCanvas.getContext('2d');
+        
+                    initialCanvas.width = imob.width;
+                    initialCanvas.height = imob.height;
+        
+                    context.drawImage(imob, 0, 0, imob.width, imob.height, 0, 0, imob.width, imob.height);
+        
+                    var imgData = context.getImageData(0, 0, imob.width, imob.height);
+        
+                    var cropTop = scanYaxis(true, imgData, imob.height, imob.width);
+                    var cropBottom = scanYaxis(false, imgData, imob.height, imob.width);
+                    var cropLeft = scanXaxis(true, imgData, imob.height, imob.width);
+                    var cropRight = scanXaxis(false, imgData, imob.height, imob.width);
+        
+                    var cropXDiff = cropRight - cropLeft;
+                    var cropYDiff = cropBottom - cropTop;
+
+                    var data = context.getImageData(cropLeft, cropTop, (cropXDiff ? cropXDiff : imob.width) , (cropYDiff ? cropYDiff : imob.height));
+        
+                    initialCanvas.height = data.height;
+                    initialCanvas.width = data.width;
+                    context.putImageData(data, 0, 0);
+        
+                    res({height: data.height, width: data.width, base64Src: initialCanvas.toDataURL("image/png")});
+
+                } catch(err) {
+                    alert("Not able to convert Image : "+imageFile.name);
+                    rej(false);
+                }
+            });
+
+
+        }
+
+        function scanXaxis (fromLeft, imgData, imgHeight, imgWidth) {
+            var offset = fromLeft? 1 : -1;
+            for(var x = fromLeft ? 0 : imgWidth - 1; fromLeft ? (x < imgWidth) : (x > -1); x += offset) {
+                for(var y = 0; y < imgHeight; y++) {
+                    var rgb = getImageRGBAPixelByPositionXY(imgData, imgWidth, x, y);
+                    if (!isWhiteOrTransparent(rgb)) {
+                        if (fromLeft) {
+                            return x;
+                        } else {
+                            return Math.min(x + 4, imgWidth);
+                        }
+                    }      
+                }
+            }
+            return 0;
+        };
+
+        function scanYaxis (fromTop, imgData, imgHeight, imgWidth) {
+            var offset = fromTop ? 1 : -1;
+            for(var y = fromTop ? 0 : imgHeight - 1; fromTop ? (y < imgHeight) : (y > -1); y += offset) {
+                for(var x = 0; x < imgWidth; x++) {
+                    var rgb = getImageRGBAPixelByPositionXY(imgData, imgWidth, x, y);
+                    if (!isWhiteOrTransparent(rgb)) {
+                        if (fromTop) {
+                            return y;
+                        } else {
+                            return Math.min(y + 4, imgHeight);
+                        }
+                    }
+                }
+            }
+            return 0;
+        }
+
+        function isWhiteOrTransparent(rgba) {
+            return (rgba[0] === 0 && rgba[1] === 0 && rgba[2] === 0) || rgba[3] === 0;
+        }
+
+        function getImageRGBAPixelByPositionXY(imgData, imgWidth, x, y) {
+            return getRGBAPixel(imgData, y * imgWidth + x)
+        }
+
+        function getRGBAPixel(imgData, index) {
+            var i = index * 4;
+            var d = imgData.data;
+
+            // [R,G,B,A]
+            return [d[i],d[i+1],d[i+2],d[i+3]];
+        }
+
+    </script>
+</html>
